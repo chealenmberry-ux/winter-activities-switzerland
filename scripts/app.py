@@ -511,6 +511,16 @@ with col1:
                 st.write(f"**Why:** {row['weather_reason']}")
                 st.write(f"**Final score:** {round(row['score'], 1)} / 100")
 
+                # Google search link
+                google_search_url = (
+                    "https://www.google.com/search?q="
+                    + row["name"].replace(" ", "+")
+                )
+
+                st.markdown(
+                    f'[🔎 Find the Activity on Google]({google_search_url})'
+                )
+
                 st.divider()
 
 with col2:
