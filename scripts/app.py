@@ -116,7 +116,7 @@ def download_weather_data(station_id):
 
 
 @st.cache_data(show_spinner=False)
-def calculate_weather_summary(station_id, activity_type):
+def calculate_weather_summary(station_id, activity_type, selected_month):
     if pd.isna(station_id):
         return {
             "weather_score": 50,
@@ -143,7 +143,14 @@ def calculate_weather_summary(station_id, activity_type):
     )
 
     weather = weather.dropna(subset=["reference_timestamp"])
-    weather = weather.sort_values("reference_timestamp").tail(7)
+
+    # Keep only selected month
+    weather = weather[
+        weather["reference_timestamp"].dt.month == selected_month
+    ]
+
+    # Use all historical data from this month
+    weather = weather.sort_values("reference_timestamp")
 
     if weather.empty:
         return {
@@ -354,6 +361,31 @@ max_travel_time = st.sidebar.slider(
 )
 
 use_weather = st.sidebar.checkbox("Use weather-based recommendations ☀️❄️", value=True)
+selected_month = st.sidebar.selectbox(
+    "Choose travel month",
+    options=[
+        "October",
+        "November",
+        "December",
+        "January",
+        "February",
+        "March",
+        "April"
+    ],
+    index=3  # January default
+)
+
+month_mapping = {
+    "October": 10,
+    "November": 11,
+    "December": 12,
+    "January": 1,
+    "February": 2,
+    "March": 3,
+    "April": 4
+}
+
+selected_month_number = month_mapping[selected_month]
 add_apres = st.sidebar.checkbox("Add nearby après-ski suggestions 🍻")
 
 # Start filtering
@@ -400,7 +432,8 @@ if use_weather and not filtered.empty:
         weather_summaries = filtered.apply(
             lambda row: calculate_weather_summary(
                 row["station_id"],
-                row["activity_type"]
+                row["activity_type"],
+                selected_month_number
             ),
             axis=1
         )
