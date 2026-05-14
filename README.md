@@ -1,7 +1,7 @@
 # winter-activities-switzerland
 Code Developed by Chealen Berry, Vicki Hrap, and Hillary Raiser
 
-**Swiss Winter Activity Finder**
+**Swiss Winter Activity Finder:**
 This project develops a website that allows the user to input preferences for winter activities in Switzerland, and outputs the top three recommendations for the user based on a variety of factors.
 
 **Project features:**
