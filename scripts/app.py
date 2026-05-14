@@ -141,14 +141,26 @@ def download_weather_data(station_id):
 
 
 @st.cache_data(show_spinner=False)
-def calculate_weather_score(station_id, activity_type):
+def calculate_weather_summary(station_id, activity_type):
     if pd.isna(station_id):
-        return 50
+        return {
+            "weather_score": 50,
+            "sun_checks": "☀️",
+            "snow_checks": "❄️",
+            "avg_temp": None,
+            "weather_reason": "Weather data unavailable"
+        }
 
     weather = download_weather_data(station_id)
 
     if weather is None or weather.empty:
-        return 50
+        return {
+            "weather_score": 50,
+            "sun_checks": "☀️",
+            "snow_checks": "❄️",
+            "avg_temp": None,
+            "weather_reason": "Weather data unavailable"
+        }
 
     weather["reference_timestamp"] = pd.to_datetime(
         weather["reference_timestamp"],
@@ -156,62 +168,98 @@ def calculate_weather_score(station_id, activity_type):
     )
 
     weather = weather.dropna(subset=["reference_timestamp"])
-    weather = weather.sort_values("reference_timestamp")
+    weather = weather.sort_values("reference_timestamp").tail(7)
 
     if weather.empty:
-        return 50
+        return {
+            "weather_score": 50,
+            "sun_checks": "☀️",
+            "snow_checks": "❄️",
+            "avg_temp": None,
+            "weather_reason": "Weather data unavailable"
+        }
 
-    latest = weather.iloc[-1]
+    avg_sunshine = weather["sre000d0"].mean() if "sre000d0" in weather else 0
+    avg_snow_height = weather["hto000d0"].mean() if "hto000d0" in weather else 0
+    avg_new_snow = weather["hns000d0"].mean() if "hns000d0" in weather else 0
+    avg_precip = weather["rre150d0"].mean() if "rre150d0" in weather else 0
+    avg_temp = weather["tre200d0"].mean() if "tre200d0" in weather else None
 
-    precipitation = latest.get("rre150d0", 0)
-    new_snow = latest.get("hns000d0", 0)
-    snow_height = latest.get("hto000d0", 0)
-    sunshine = latest.get("sre000d0", 0)
-    temperature = latest.get("tre200d0", 0)
+    avg_sunshine = 0 if pd.isna(avg_sunshine) else avg_sunshine
+    avg_snow_height = 0 if pd.isna(avg_snow_height) else avg_snow_height
+    avg_new_snow = 0 if pd.isna(avg_new_snow) else avg_new_snow
+    avg_precip = 0 if pd.isna(avg_precip) else avg_precip
 
-    precipitation = 0 if pd.isna(precipitation) else precipitation
-    new_snow = 0 if pd.isna(new_snow) else new_snow
-    snow_height = 0 if pd.isna(snow_height) else snow_height
-    sunshine = 0 if pd.isna(sunshine) else sunshine
-    temperature = 0 if pd.isna(temperature) else temperature
+    # Icon/check display
+    if avg_sunshine >= 5:
+        sun_checks = "☀️ ✅✅✅"
+    elif avg_sunshine >= 2:
+        sun_checks = "☀️ ✅✅"
+    elif avg_sunshine > 0:
+        sun_checks = "☀️ ✅"
+    else:
+        sun_checks = "☀️ —"
+
+    if avg_snow_height >= 80:
+        snow_checks = "❄️ ✅✅✅"
+    elif avg_snow_height >= 30:
+        snow_checks = "❄️ ✅✅"
+    elif avg_snow_height > 0:
+        snow_checks = "❄️ ✅"
+    else:
+        snow_checks = "❄️ —"
 
     score = 50
+    reasons = []
 
     if activity_type == "Skiing":
-        score += min(snow_height / 2, 30)
-        score += min(new_snow * 2, 20)
-        score += min(sunshine * 0.4, 15)
-        score -= precipitation * 2
+        score += min(avg_snow_height / 2, 30)
+        score += min(avg_new_snow * 2, 15)
+        score += min(avg_sunshine * 3, 15)
+        score -= avg_precip * 2
 
-        if temperature > 5:
-            score -= 15
+        reasons.append("snow conditions are important for skiing")
+        if avg_sunshine >= 2:
+            reasons.append("good sunshine expected")
+        if avg_snow_height >= 30:
+            reasons.append("good snow coverage")
 
     elif activity_type == "Snowshoeing":
-        score += min(snow_height / 3, 25)
-        score += min(new_snow * 1.5, 15)
-        score += min(sunshine * 0.5, 15)
-        score -= precipitation * 1.5
+        score += min(avg_snow_height / 3, 25)
+        score += min(avg_sunshine * 3, 20)
+        score -= avg_precip * 1.5
 
-        if temperature > 6:
-            score -= 10
+        reasons.append("snow and sunshine are good for snowshoeing")
+        if avg_snow_height >= 30:
+            reasons.append("enough snow for the trail")
 
     elif activity_type == "Winter hiking":
-        score += min(sunshine * 0.8, 25)
-        score -= precipitation * 2
+        score += min(avg_sunshine * 4, 30)
+        score -= avg_precip * 2
 
-        if snow_height > 80:
-            score -= 10
+        reasons.append("sunshine is the main positive factor")
+        if avg_precip <= 1:
+            reasons.append("low precipitation")
 
     elif activity_type == "Ice skating":
-        if temperature < 0:
-            score += 25
+        score += min(avg_sunshine * 3, 15)
+        score -= avg_precip * 2
 
-        score += min(sunshine * 0.4, 15)
-        score -= precipitation * 2
+        if avg_temp is not None and avg_temp < 0:
+            score += 25
+            reasons.append("cold temperatures are good for ice skating")
+        else:
+            reasons.append("temperature may be less ideal for ice skating")
 
     score = max(0, min(100, score))
 
-    return score
+    return {
+        "weather_score": round(score, 1),
+        "sun_checks": sun_checks,
+        "snow_checks": snow_checks,
+        "avg_temp": round(avg_temp, 1) if avg_temp is not None and not pd.isna(avg_temp) else None,
+        "weather_reason": ", ".join(reasons)
+    }
 
 
 # --------------------------------------------------
@@ -314,15 +362,25 @@ filtered = filtered[
 
 if use_weather and not filtered.empty:
     with st.spinner("Checking weather conditions..."):
-        filtered["weather_score"] = filtered.apply(
-            lambda row: calculate_weather_score(
+        weather_summaries = filtered.apply(
+            lambda row: calculate_weather_summary(
                 row["station_id"],
                 row["activity_type"]
             ),
             axis=1
         )
+
+        filtered["weather_score"] = weather_summaries.apply(lambda x: x["weather_score"])
+        filtered["sun_checks"] = weather_summaries.apply(lambda x: x["sun_checks"])
+        filtered["snow_checks"] = weather_summaries.apply(lambda x: x["snow_checks"])
+        filtered["avg_temp"] = weather_summaries.apply(lambda x: x["avg_temp"])
+        filtered["weather_reason"] = weather_summaries.apply(lambda x: x["weather_reason"])
 else:
     filtered["weather_score"] = 50
+    filtered["sun_checks"] = "☀️ —"
+    filtered["snow_checks"] = "❄️ —"
+    filtered["avg_temp"] = None
+    filtered["weather_reason"] = "Weather scoring not used"
 
 # --------------------------------------------------
 # FINAL SCORING
@@ -368,6 +426,13 @@ with col1:
 
                 if pd.notna(row["weather_score"]):
                     st.write(f"**Weather score:** {round(row['weather_score'], 1)} / 100")
+                    st.write(f"**Sun:** {row['sun_checks']}")
+                    st.write(f"**Snow:** {row['snow_checks']}")
+
+                    if pd.notna(row["avg_temp"]):
+                        st.write(f"**Average temperature:** {row['avg_temp']} °C")
+
+                    st.write(f"**Why:** {row['weather_reason']}")
 
                 st.write(f"**Final score:** {round(row['score'], 1)} / 100")
 
