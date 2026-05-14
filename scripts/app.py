@@ -361,20 +361,29 @@ filtered = all_activities[
     all_activities["activity_type"] == activity_choice
 ].copy()
 
-# Difficulty filter only appears if selected activity has difficulty values
-difficulty_options = sorted(filtered["difficulty"].dropna().unique())
+# Difficulty filter only for snowshoeing and winter hiking
+if activity_choice in ["Snowshoeing", "Winter hiking"]:
 
-if len(difficulty_options) > 0:
-    selected_difficulty = st.sidebar.selectbox(
-        "Choose difficulty",
-        options=difficulty_options
-    )
+    st.sidebar.markdown("### Select difficulty levels")
+
+    easy_checked = st.sidebar.checkbox("Easy", value=True)
+    moderate_checked = st.sidebar.checkbox("Moderate", value=True)
+    hard_checked = st.sidebar.checkbox("Hard", value=True)
+
+    selected_difficulties = []
+
+    if easy_checked:
+        selected_difficulties.append("Easy")
+
+    if moderate_checked:
+        selected_difficulties.append("Moderate")
+
+    if hard_checked:
+        selected_difficulties.append("Hard")
 
     filtered = filtered[
-        filtered["difficulty"] == selected_difficulty
+        filtered["difficulty"].isin(selected_difficulties)
     ].copy()
-else:
-    selected_difficulty = None
 
 filtered = filtered[
     (filtered["price"].isna()) | (filtered["price"] <= max_price)
