@@ -8,7 +8,7 @@ CHAT RECOMMENDS WE INCLUDE THE FOLLOWING:
 
 1. README quality
 
-This matters A LOT.
+This matters A LOT!
 
 Include:
 
