@@ -16,60 +16,21 @@ st.markdown(
     <style>
     .stApp {
         background-color: #0a0f1f;
-        color: #f8fafc;
-    }
-
-    h1, h2, h3, p, label, div {
-        color: #f8fafc;
+        color: white;
     }
 
     section[data-testid="stSidebar"] {
         background-color: #111827;
     }
 
-    div[data-baseweb="select"] > div {
-        background-color: #1e293b;
-        color: white;
-        border: 1px solid #6366f1;
-    }
-
-    span[data-baseweb="tag"] {
-        background-color: #4f46e5 !important;
-        color: white !important;
-    }
-
-    .stSlider > div > div > div > div {
-        background-color: #6366f1;
-    }
-
-    .stCheckbox label {
+    h1, h2, h3, p, label {
         color: white;
     }
 
     div[data-testid="stMetric"] {
         background-color: #1e1b4b;
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #818cf8;
-    }
-
-    div[data-testid="stMetric"] label {
-        color: #c7d2fe !important;
-    }
-
-    div[data-testid="stMetric"] div {
-        color: white !important;
-    }
-
-    .stButton > button {
-        background-color: #4338ca;
-        color: white;
+        padding: 15px;
         border-radius: 10px;
-        border: none;
-    }
-
-    .stButton > button:hover {
-        background-color: #6366f1;
     }
 
     hr {
@@ -80,10 +41,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --------------------------------------------------
-# TRAVEL TIME FUNCTIONS
-# --------------------------------------------------
-
+# Travel time functions
 ZURICH_LAT = 47.3782
 ZURICH_LON = 8.5402
 
@@ -111,14 +69,10 @@ def estimate_travel_time(distance_km):
     if pd.isna(distance_km):
         return None
 
-    # Rough estimate: 45 km/h average including transfers, mountain roads, waiting, etc.
     return distance_km / 45 * 60
 
 
-# --------------------------------------------------
-# WEATHER FUNCTIONS
-# --------------------------------------------------
-
+# Weather functions
 @st.cache_data(show_spinner=False)
 def download_weather_data(station_id):
     station_id = str(station_id).strip().lower()
@@ -146,28 +100,13 @@ def download_weather_data(station_id):
         nime.columns = nime.columns.str.strip().str.lower()
         smn.columns = smn.columns.str.strip().str.lower()
 
-        nime_cols = [
-            "reference_timestamp",
-            "rre150d0",
-            "hns000d0",
-            "hto000d0"
-        ]
-
-        smn_cols = [
-            "reference_timestamp",
-            "sre000d0",
-            "tre200d0"
-        ]
+        nime_cols = ["reference_timestamp", "rre150d0", "hns000d0", "hto000d0"]
+        smn_cols = ["reference_timestamp", "sre000d0", "tre200d0"]
 
         nime = nime[[c for c in nime_cols if c in nime.columns]]
         smn = smn[[c for c in smn_cols if c in smn.columns]]
 
-        weather = pd.merge(
-            nime,
-            smn,
-            on="reference_timestamp",
-            how="outer"
-        )
+        weather = pd.merge(nime, smn, on="reference_timestamp", how="outer")
 
         return weather
 
@@ -252,29 +191,18 @@ def calculate_weather_summary(station_id, activity_type):
         score += min(avg_new_snow * 2, 15)
         score += min(avg_sunshine * 3, 15)
         score -= avg_precip * 2
-
         reasons.append("snow conditions are important for skiing")
-        if avg_sunshine >= 2:
-            reasons.append("good sunshine expected")
-        if avg_snow_height >= 30:
-            reasons.append("good snow coverage")
 
     elif activity_type == "Snowshoeing":
         score += min(avg_snow_height / 3, 25)
         score += min(avg_sunshine * 3, 20)
         score -= avg_precip * 1.5
-
         reasons.append("snow and sunshine are good for snowshoeing")
-        if avg_snow_height >= 30:
-            reasons.append("enough snow for the trail")
 
     elif activity_type == "Winter hiking":
         score += min(avg_sunshine * 4, 30)
         score -= avg_precip * 2
-
         reasons.append("sunshine is the main positive factor")
-        if avg_precip <= 1:
-            reasons.append("low precipitation")
 
     elif activity_type == "Ice skating":
         score += min(avg_sunshine * 3, 15)
@@ -297,10 +225,7 @@ def calculate_weather_summary(station_id, activity_type):
     }
 
 
-# --------------------------------------------------
-# LOAD DATASETS
-# --------------------------------------------------
-
+# Load data
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
@@ -349,7 +274,6 @@ all_activities = pd.concat(
     ignore_index=True
 )
 
-# Add estimated distance and travel time from Zürich
 all_activities["distance_from_zurich_km"] = all_activities.apply(
     lambda row: calculate_distance_from_zurich(row["latitude"], row["longitude"]),
     axis=1
@@ -359,23 +283,17 @@ all_activities["travel_time_min"] = all_activities["distance_from_zurich_km"].ap
     estimate_travel_time
 )
 
-# --------------------------------------------------
-# PAGE HEADER
-# --------------------------------------------------
-
+# Header
 st.title("❄️ Swiss Winter Activity Finder")
-st.markdown("Find winter activities in Switzerland based on your preferences.")
+st.write("This app suggests winter activities based on difficulty, weather, price, and estimated travel time.")
+st.caption("Travel time is estimated from Zürich HB using coordinates, so it is approximate.")
 
-# --------------------------------------------------
-# SIDEBAR FILTERS
-# --------------------------------------------------
-
+# Sidebar
 st.sidebar.header("Choose your preferences")
 
-activity_choice = st.sidebar.multiselect(
-    "Activities",
-    options=sorted(all_activities["activity_type"].dropna().unique()),
-    default=sorted(all_activities["activity_type"].dropna().unique())
+activity_choice = st.sidebar.radio(
+    "Choose one activity",
+    options=sorted(all_activities["activity_type"].dropna().unique())
 )
 
 max_price = st.sidebar.slider(
@@ -393,16 +311,27 @@ max_travel_time = st.sidebar.slider(
 )
 
 use_weather = st.sidebar.checkbox("Use weather-based recommendations ☀️❄️", value=True)
-
 add_apres = st.sidebar.checkbox("Add nearby après-ski suggestions 🍻")
 
-# --------------------------------------------------
-# FILTER DATA
-# --------------------------------------------------
-
+# Start filtering
 filtered = all_activities[
-    all_activities["activity_type"].isin(activity_choice)
+    all_activities["activity_type"] == activity_choice
 ].copy()
+
+# Difficulty filter only appears if selected activity has difficulty values
+difficulty_options = sorted(filtered["difficulty"].dropna().unique())
+
+if len(difficulty_options) > 0:
+    selected_difficulty = st.sidebar.selectbox(
+        "Choose difficulty",
+        options=difficulty_options
+    )
+
+    filtered = filtered[
+        filtered["difficulty"] == selected_difficulty
+    ].copy()
+else:
+    selected_difficulty = None
 
 filtered = filtered[
     (filtered["price"].isna()) | (filtered["price"] <= max_price)
@@ -413,10 +342,7 @@ filtered = filtered[
     (filtered["travel_time_min"] <= max_travel_time)
 ].copy()
 
-# --------------------------------------------------
-# WEATHER SCORING
-# --------------------------------------------------
-
+# Weather scoring
 if use_weather and not filtered.empty:
     with st.spinner("Checking weather conditions..."):
         weather_summaries = filtered.apply(
@@ -439,32 +365,26 @@ else:
     filtered["avg_temp"] = None
     filtered["weather_reason"] = "Weather scoring not used"
 
-# --------------------------------------------------
-# FINAL SCORING
-# --------------------------------------------------
-
+# Final score
 price_score = 100 - filtered["price"].fillna(0)
 
-# Higher score when travel time is close to the user's selected maximum
-# Example: if max_travel_time = 120, an activity at 115 min scores better than one at 40 min
 filtered["travel_score"] = 100 - abs(
     filtered["travel_time_min"].fillna(max_travel_time) - max_travel_time
 )
 
 filtered["travel_score"] = filtered["travel_score"].clip(lower=0, upper=100)
 
+# Difficulty is already required by filtering.
+# Weather is most important, price is second, distance/travel time is least important.
 filtered["score"] = (
+    0.6 * filtered["weather_score"].fillna(50) +
     0.3 * price_score +
-    0.4 * filtered["weather_score"].fillna(50) +
-    0.3 * filtered["travel_score"]
+    0.1 * filtered["travel_score"]
 )
 
 top_3 = filtered.sort_values("score", ascending=False).head(3)
 
-# --------------------------------------------------
-# PAGE LAYOUT
-# --------------------------------------------------
-
+# Page layout
 col1, col2 = st.columns([2, 1])
 
 with col1:
@@ -478,11 +398,11 @@ with col1:
                 st.markdown(f"### {row['name']}")
                 st.write(f"**Activity:** {row['activity_type']}")
 
-                if pd.notna(row["price"]):
-                    st.write(f"**Price:** CHF {row['price']}")
-
                 if pd.notna(row["difficulty"]):
                     st.write(f"**Difficulty:** {row['difficulty']}")
+
+                if pd.notna(row["price"]):
+                    st.write(f"**Price:** CHF {row['price']}")
 
                 if pd.notna(row["length_km"]):
                     st.write(f"**Length:** {row['length_km']} km")
@@ -491,28 +411,19 @@ with col1:
                     st.write(f"**Duration:** {row['duration_min']} min")
 
                 if pd.notna(row["distance_from_zurich_km"]):
-                    st.write(
-                        f"**Distance from Zürich:** {round(row['distance_from_zurich_km'], 1)} km"
-                    )
+                    st.write(f"**Distance from Zürich:** {round(row['distance_from_zurich_km'], 1)} km")
 
                 if pd.notna(row["travel_time_min"]):
-                    st.write(
-                        f"**Estimated travel time from Zürich:** {round(row['travel_time_min'])} min"
-                    )
-                    st.write(
-                        f"**Travel match score:** {round(row['travel_score'], 1)} / 100"
-                    )
+                    st.write(f"**Estimated travel time from Zürich:** {round(row['travel_time_min'])} min")
 
-                if pd.notna(row["weather_score"]):
-                    st.write(f"**Weather score:** {round(row['weather_score'], 1)} / 100")
-                    st.write(f"**Sun:** {row['sun_checks']}")
-                    st.write(f"**Snow:** {row['snow_checks']}")
+                st.write(f"**Weather score:** {round(row['weather_score'], 1)} / 100")
+                st.write(f"**Sun:** {row['sun_checks']}")
+                st.write(f"**Snow:** {row['snow_checks']}")
 
-                    if pd.notna(row["avg_temp"]):
-                        st.write(f"**Average temperature:** {row['avg_temp']} °C")
+                if pd.notna(row["avg_temp"]):
+                    st.write(f"**Average temperature:** {row['avg_temp']} °C")
 
-                    st.write(f"**Why:** {row['weather_reason']}")
-
+                st.write(f"**Why:** {row['weather_reason']}")
                 st.write(f"**Final score:** {round(row['score'], 1)} / 100")
 
                 st.divider()
@@ -523,15 +434,10 @@ with col2:
     st.metric("Top Recommendations", len(top_3))
 
     if use_weather:
-        st.metric(
-            "Average Weather Score",
-            round(filtered["weather_score"].mean(), 1) if not filtered.empty else 0
-        )
+        average_weather = round(filtered["weather_score"].mean(), 1) if not filtered.empty else 0
+        st.metric("Average Weather Score", average_weather)
 
-# --------------------------------------------------
-# APRÈS-SKI ADD-ON
-# --------------------------------------------------
-
+# Après-ski add-on
 if add_apres and not top_3.empty:
     st.subheader("🍻 Nearby Après-Ski Suggestions")
 
@@ -547,10 +453,6 @@ if add_apres and not top_3.empty:
 
             st.markdown(f"### Near {activity['name']}")
             st.write(f"**Après-ski option:** {closest_apres['name']}")
-
-            if "latitude" in closest_apres and "longitude" in closest_apres:
-                st.write(
-                    f"Location: {closest_apres['latitude']}, {closest_apres['longitude']}"
-                )
+            st.write(f"Location: {closest_apres['latitude']}, {closest_apres['longitude']}")
 
             st.divider()
