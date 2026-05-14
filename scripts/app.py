@@ -3,6 +3,7 @@ import streamlit as st
 import requests
 from io import StringIO
 from pathlib import Path
+from math import radians, sin, cos, sqrt, atan2
 
 st.set_page_config(
     page_title="Swiss Winter Activity Finder",
@@ -80,6 +81,41 @@ st.markdown(
 )
 
 # --------------------------------------------------
+# TRAVEL TIME FUNCTIONS
+# --------------------------------------------------
+
+ZURICH_LAT = 47.3782
+ZURICH_LON = 8.5402
+
+def calculate_distance_from_zurich(lat, lon):
+    if pd.isna(lat) or pd.isna(lon):
+        return None
+
+    earth_radius = 6371
+
+    lat1 = radians(ZURICH_LAT)
+    lon1 = radians(ZURICH_LON)
+    lat2 = radians(lat)
+    lon2 = radians(lon)
+
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+
+    return earth_radius * c
+
+
+def estimate_travel_time(distance_km):
+    if pd.isna(distance_km):
+        return None
+
+    # Rough estimate: 45 km/h average including transfers, mountain roads, waiting, etc.
+    return distance_km / 45 * 60
+
+
+# --------------------------------------------------
 # WEATHER FUNCTIONS
 # --------------------------------------------------
 
@@ -112,15 +148,15 @@ def download_weather_data(station_id):
 
         nime_cols = [
             "reference_timestamp",
-            "rre150d0",  # precipitation
-            "hns000d0",  # new snow
-            "hto000d0"   # snow height
+            "rre150d0",
+            "hns000d0",
+            "hto000d0"
         ]
 
         smn_cols = [
             "reference_timestamp",
-            "sre000d0",  # sunshine
-            "tre200d0"   # temperature
+            "sre000d0",
+            "tre200d0"
         ]
 
         nime = nime[[c for c in nime_cols if c in nime.columns]]
@@ -190,7 +226,6 @@ def calculate_weather_summary(station_id, activity_type):
     avg_new_snow = 0 if pd.isna(avg_new_snow) else avg_new_snow
     avg_precip = 0 if pd.isna(avg_precip) else avg_precip
 
-    # Icon/check display
     if avg_sunshine >= 5:
         sun_checks = "☀️ ✅✅✅"
     elif avg_sunshine >= 2:
@@ -270,10 +305,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
 apres_ski = pd.read_excel(DATA_DIR / "apres_ski.xlsx")
-skating = pd.read_excel(DATA_DIR / "skating_rinks.xlsx")
-ski = pd.read_excel(DATA_DIR / "ski_resorts.xlsx")
-snowshoe = pd.read_excel(DATA_DIR / "snowshoe_trails.xlsx")
-winter_hiking = pd.read_excel(DATA_DIR / "winter_hiking.xlsx")
+skating = pd.read_excel(DATA_DIR / "skating_rinks_with_travel.xlsx")
+ski = pd.read_excel(DATA_DIR / "ski_resorts_with_travel.xlsx")
+snowshoe = pd.read_excel(DATA_DIR / "snowshoe_trails_with_travel.xlsx")
+winter_hiking = pd.read_excel(DATA_DIR / "winter_hiking_with_travel.xlsx")
 
 difficulty_translation = {
     "leicht": "Easy",
@@ -314,6 +349,16 @@ all_activities = pd.concat(
     ignore_index=True
 )
 
+# Add estimated distance and travel time from Zürich
+all_activities["distance_from_zurich_km"] = all_activities.apply(
+    lambda row: calculate_distance_from_zurich(row["latitude"], row["longitude"]),
+    axis=1
+)
+
+all_activities["travel_time_min"] = all_activities["distance_from_zurich_km"].apply(
+    estimate_travel_time
+)
+
 # --------------------------------------------------
 # PAGE HEADER
 # --------------------------------------------------
@@ -340,6 +385,13 @@ max_price = st.sidebar.slider(
     value=50
 )
 
+max_travel_time = st.sidebar.slider(
+    "Maximum estimated travel time from Zürich HB (minutes)",
+    min_value=0,
+    max_value=300,
+    value=180
+)
+
 use_weather = st.sidebar.checkbox("Use weather-based recommendations ☀️❄️", value=True)
 
 add_apres = st.sidebar.checkbox("Add nearby après-ski suggestions 🍻")
@@ -354,6 +406,11 @@ filtered = all_activities[
 
 filtered = filtered[
     (filtered["price"].isna()) | (filtered["price"] <= max_price)
+].copy()
+
+filtered = filtered[
+    (filtered["travel_time_min"].isna()) |
+    (filtered["travel_time_min"] <= max_travel_time)
 ].copy()
 
 # --------------------------------------------------
@@ -388,9 +445,18 @@ else:
 
 price_score = 100 - filtered["price"].fillna(0)
 
+# Higher score when travel time is close to the user's selected maximum
+# Example: if max_travel_time = 120, an activity at 115 min scores better than one at 40 min
+filtered["travel_score"] = 100 - abs(
+    filtered["travel_time_min"].fillna(max_travel_time) - max_travel_time
+)
+
+filtered["travel_score"] = filtered["travel_score"].clip(lower=0, upper=100)
+
 filtered["score"] = (
-    0.5 * price_score +
-    0.5 * filtered["weather_score"].fillna(50)
+    0.3 * price_score +
+    0.4 * filtered["weather_score"].fillna(50) +
+    0.3 * filtered["travel_score"]
 )
 
 top_3 = filtered.sort_values("score", ascending=False).head(3)
@@ -423,6 +489,19 @@ with col1:
 
                 if pd.notna(row["duration_min"]):
                     st.write(f"**Duration:** {row['duration_min']} min")
+
+                if pd.notna(row["distance_from_zurich_km"]):
+                    st.write(
+                        f"**Distance from Zürich:** {round(row['distance_from_zurich_km'], 1)} km"
+                    )
+
+                if pd.notna(row["travel_time_min"]):
+                    st.write(
+                        f"**Estimated travel time from Zürich:** {round(row['travel_time_min'])} min"
+                    )
+                    st.write(
+                        f"**Travel match score:** {round(row['travel_score'], 1)} / 100"
+                    )
 
                 if pd.notna(row["weather_score"]):
                     st.write(f"**Weather score:** {round(row['weather_score'], 1)} / 100")
