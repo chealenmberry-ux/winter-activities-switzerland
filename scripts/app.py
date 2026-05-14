@@ -274,6 +274,49 @@ all_activities = pd.concat(
     ignore_index=True
 )
 
+# --------------------------------------------------
+# LOAD WEATHER STATION MATCHES
+# --------------------------------------------------
+weather_matches = pd.read_excel(
+    DATA_DIR / "activity_locations_with_weather_stations.xlsx"
+)
+
+# Clean column names
+weather_matches.columns = weather_matches.columns.str.strip()
+
+# Create helper rounded coordinate columns
+all_activities["lat_round"] = all_activities["latitude"].round(4)
+all_activities["lon_round"] = all_activities["longitude"].round(4)
+
+weather_matches["lat_round"] = weather_matches["lat_left"].round(4)
+weather_matches["lon_round"] = weather_matches["lon_left"].round(4)
+
+# Build lookup table: activity coordinates -> MeteoSwiss station abbreviation
+weather_lookup = weather_matches[
+    ["lat_round", "lon_round", "station_abbr"]
+].drop_duplicates()
+
+# Rename station_abbr to station_id for the website logic
+weather_lookup = weather_lookup.rename(
+    columns={"station_abbr": "station_id"}
+)
+
+# IMPORTANT: remove old empty station_id if it exists
+if "station_id" in all_activities.columns:
+    all_activities = all_activities.drop(columns=["station_id"])
+
+# Merge station_id into activity table
+all_activities = all_activities.merge(
+    weather_lookup,
+    on=["lat_round", "lon_round"],
+    how="left"
+)
+
+# Remove helper columns
+all_activities = all_activities.drop(
+    columns=["lat_round", "lon_round"]
+)
+
 all_activities["distance_from_zurich_km"] = all_activities.apply(
     lambda row: calculate_distance_from_zurich(row["latitude"], row["longitude"]),
     axis=1
