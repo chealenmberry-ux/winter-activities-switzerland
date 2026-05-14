@@ -3,5 +3,3 @@ numpy
 geopy
 openpyxl
 streamlit
-
-*MODIFY THIS BASED ON WHAT CODE PACKAGES WE USE*
