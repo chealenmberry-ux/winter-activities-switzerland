@@ -538,22 +538,19 @@ if add_apres and not top_3.empty:
 
             st.markdown(f"### Near {activity['name']}")
             st.write(f"**Après-ski option:** {closest_apres['name']}")
-            st.write(f"Location: {closest_apres['latitude']}, {closest_apres['longitude']}")
-
-            st.divider()
-
-            st.markdown(f"### Near {activity['name']}")
-            st.write(f"**Après-ski option:** {closest_apres['name']}")
 
             if pd.notna(closest_apres["address"]):
 
                 google_maps_url = (
-                    f"https://www.google.com/maps/search/?api=1&query="
-                    f"{closest_apres['address']}"
+                    "https://www.google.com/maps/search/?api=1&query="
+                    + closest_apres["address"].replace(" ", "+")
                 )
 
                 st.markdown(
-                    f"[📍 {closest_apres['address']}]({google_maps_url})"
+                    f'**Location:** '
+                    f'<a href="{google_maps_url}" target="_blank">'
+                    f'{closest_apres["address"]}</a>',
+                    unsafe_allow_html=True
                 )
 
             st.divider()
