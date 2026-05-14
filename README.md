@@ -14,7 +14,21 @@ As the user updates their preferences, the website automatically updates in real
 GitHub, Python, Pandas, Streamlit, Geopy, Visual Studio Code
 
 **Sources:**
-INPUT THE DATA SOURCES HERE STILL
+
+1. Federal Office of Topography swisstopo. (n.d.). Snowshoe trails. geo.admin.ch. https://data.geo.admin.ch/browser/index.html#/collections/ch.astra.schneeschuhwanderwege/items/schneeschuhwanderwege?.asset=asset-schneeschuhwanderwege_2056-gpkg
+   
+2. Federal Office of Topography swisstopo. (n.d.). Winter hiking trails. geo.admin.ch. https://data.geo.admin.ch/browser/index.html#/collections/ch.astra.winterwanderwege/items/winterwanderwege
+
+3. MeteoSwiss. (n.d.). Download data without coding skills: Snow data. MeteoSwiss. https://www.meteoswiss.admin.ch/services-and-publications/applications/ext/download-data-without-coding-skills.html#lang=en&mdt=normal&pgid=Snow&sid=DAV&col=ch.meteoschweiz.ogd-smn&di=daily&tr=recent&hdr=
+
+4. Skiresort.info. (n.d.). Best ski resorts in Switzerland – après-ski. Skiresort.info. https://www.skiresort.info/best-ski-resorts/switzerland/sorted/apres-ski/
+
+5. Skiresort.info. (n.d.). Skiresort.info. https://www.skiresort.info/
+
+6. Switzerland Tourism. (n.d.). Ice rinks. MySwitzerland.com. https://www.myswitzerland.com/en-ch/experiences/winter/ice-rinks/
+
+
+
 
 **How to run the Swiss Winter Activity Finder:**
 Go the the website url: https://swiss-winter-activity-finder.streamlit.app/
