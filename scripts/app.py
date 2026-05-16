@@ -4,48 +4,76 @@ import requests
 from io import StringIO
 from pathlib import Path
 from math import radians, sin, cos, sqrt, atan2
+import folium
+from streamlit_folium import st_folium
 
+
+# Page setup
 st.set_page_config(
     page_title="Swiss Winter Activity Finder",
     page_icon="❄️",
     layout="wide"
 )
 
-st.markdown(
-    """
+
+# Custom CSS because the default Streamlit theme was too bright for a winter app
+st.markdown("""
+<style>
     <style>
     .stApp {
         background-color: #0a0f1f;
-        color: white;
+        color: #f8fafc;
     }
 
-    section[data-testid="stSidebar"] {
-        background-color: #111827;
+    .main .block-container {
+        padding-top: 1rem;
+        background-color: #0a0f1f;
     }
 
-    h1, h2, h3, p, label {
-        color: white;
+    header[data-testid="stHeader"] {
+        background: transparent;
     }
 
-    div[data-testid="stMetric"] {
-        background-color: #1e1b4b;
-        padding: 15px;
-        border-radius: 10px;
+    [data-testid="stToolbar"] {
+        right: 2rem;
     }
 
-    hr {
-        border-color: #334155;
+    div[data-testid="stContainer"] {
+        background-color: #f0f2f6;
+        border-radius: 18px;
+        padding: 20px;
+        color: #31333f;
     }
+
+    div[data-testid="stContainer"] p,
+    div[data-testid="stContainer"] h2 {
+        color: #31333f !important;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# Travel time functions
+
+# ==================================================
+# BASIC SETTINGS
+# ==================================================
+
+# Zurich HB coordinates
 ZURICH_LAT = 47.3782
 ZURICH_LON = 8.5402
 
-def calculate_distance_from_zurich(lat, lon):
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+
+
+# ==================================================
+# TRAVEL TIME FUNCTIONS
+# ==================================================
+
+def get_distance_from_zurich(lat, lon):
+    # Haversine formula, adapted from examples online
     if pd.isna(lat) or pd.isna(lon):
         return None
 
@@ -66,15 +94,21 @@ def calculate_distance_from_zurich(lat, lon):
 
 
 def estimate_travel_time(distance_km):
+    # We estimate travel time from distance. This is not exact public transit time.
     if pd.isna(distance_km):
         return None
 
-    return distance_km / 45 * 60
+    average_speed = 45
+    return distance_km / average_speed * 60
 
 
-# Weather functions
+# ==================================================
+# WEATHER FUNCTIONS
+# ==================================================
+
 @st.cache_data(show_spinner=False)
 def download_weather_data(station_id):
+    # Downloads recent MeteoSwiss data for a station
     station_id = str(station_id).strip().lower()
 
     try:
@@ -103,39 +137,32 @@ def download_weather_data(station_id):
         nime_cols = ["reference_timestamp", "rre150d0", "hns000d0", "hto000d0"]
         smn_cols = ["reference_timestamp", "sre000d0", "tre200d0"]
 
-        nime = nime[[c for c in nime_cols if c in nime.columns]]
-        smn = smn[[c for c in smn_cols if c in smn.columns]]
+        nime = nime[[col for col in nime_cols if col in nime.columns]]
+        smn = smn[[col for col in smn_cols if col in smn.columns]]
 
         weather = pd.merge(nime, smn, on="reference_timestamp", how="outer")
-
         return weather
 
-    except Exception as e:
-        print(f"Weather download failed for {station_id}: {e}")
+    except Exception:
         return None
 
 
-@st.cache_data(show_spinner=False)
-def calculate_weather_summary(station_id, activity_type, selected_month):
+def get_weather_score(station_id, activity_type, selected_month):
+    # Default score if we do not have weather data
+    default_weather = {
+        "weather_score": 50,
+        "sun_checks": "☀️ —",
+        "snow_checks": "❄️ —",
+        "avg_temp": None
+    }
+
     if pd.isna(station_id):
-        return {
-            "weather_score": 50,
-            "sun_checks": "☀️",
-            "snow_checks": "❄️",
-            "avg_temp": None,
-            "weather_reason": "Weather data unavailable"
-        }
+        return default_weather
 
     weather = download_weather_data(station_id)
 
     if weather is None or weather.empty:
-        return {
-            "weather_score": 50,
-            "sun_checks": "☀️",
-            "snow_checks": "❄️",
-            "avg_temp": None,
-            "weather_reason": "Weather data unavailable"
-        }
+        return default_weather
 
     weather["reference_timestamp"] = pd.to_datetime(
         weather["reference_timestamp"],
@@ -144,22 +171,13 @@ def calculate_weather_summary(station_id, activity_type, selected_month):
 
     weather = weather.dropna(subset=["reference_timestamp"])
 
-    # Keep only selected month
+    # Keep only the selected month
     weather = weather[
         weather["reference_timestamp"].dt.month == selected_month
     ]
 
-    # Use all historical data from this month
-    weather = weather.sort_values("reference_timestamp")
-
     if weather.empty:
-        return {
-            "weather_score": 50,
-            "sun_checks": "☀️",
-            "snow_checks": "❄️",
-            "avg_temp": None,
-            "weather_reason": "Weather data unavailable"
-        }
+        return default_weather
 
     avg_sunshine = weather["sre000d0"].mean() if "sre000d0" in weather else 0
     avg_snow_height = weather["hto000d0"].mean() if "hto000d0" in weather else 0
@@ -167,11 +185,13 @@ def calculate_weather_summary(station_id, activity_type, selected_month):
     avg_precip = weather["rre150d0"].mean() if "rre150d0" in weather else 0
     avg_temp = weather["tre200d0"].mean() if "tre200d0" in weather else None
 
+    # Replace missing values with 0 so the score does not crash
     avg_sunshine = 0 if pd.isna(avg_sunshine) else avg_sunshine
     avg_snow_height = 0 if pd.isna(avg_snow_height) else avg_snow_height
     avg_new_snow = 0 if pd.isna(avg_new_snow) else avg_new_snow
     avg_precip = 0 if pd.isna(avg_precip) else avg_precip
 
+    # Simple icon summary for the website output
     if avg_sunshine >= 5:
         sun_checks = "☀️ ✅✅✅"
     elif avg_sunshine >= 2:
@@ -191,25 +211,22 @@ def calculate_weather_summary(station_id, activity_type, selected_month):
         snow_checks = "❄️ —"
 
     score = 50
-    reasons = []
 
+    # These scores are our simple ranking assumptions
     if activity_type == "Skiing":
         score += min(avg_snow_height / 2, 30)
         score += min(avg_new_snow * 2, 15)
         score += min(avg_sunshine * 3, 15)
         score -= avg_precip * 2
-        reasons.append("snow conditions are important for skiing")
 
     elif activity_type == "Snowshoeing":
         score += min(avg_snow_height / 3, 25)
         score += min(avg_sunshine * 3, 20)
         score -= avg_precip * 1.5
-        reasons.append("snow and sunshine are good for snowshoeing")
 
     elif activity_type == "Winter hiking":
         score += min(avg_sunshine * 4, 30)
         score -= avg_precip * 2
-        reasons.append("sunshine is the main positive factor")
 
     elif activity_type == "Ice skating":
         score += min(avg_sunshine * 3, 15)
@@ -217,9 +234,6 @@ def calculate_weather_summary(station_id, activity_type, selected_month):
 
         if avg_temp is not None and avg_temp < 0:
             score += 25
-            reasons.append("cold temperatures are good for ice skating")
-        else:
-            reasons.append("temperature may be less ideal for ice skating")
 
     score = max(0, min(100, score))
 
@@ -227,14 +241,13 @@ def calculate_weather_summary(station_id, activity_type, selected_month):
         "weather_score": round(score, 1),
         "sun_checks": sun_checks,
         "snow_checks": snow_checks,
-        "avg_temp": round(avg_temp, 1) if avg_temp is not None and not pd.isna(avg_temp) else None,
-        "weather_reason": ", ".join(reasons)
+        "avg_temp": round(avg_temp, 1) if avg_temp is not None and not pd.isna(avg_temp) else None
     }
 
 
-# Load data
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+# ==================================================
+# LOAD AND PREPARE DATA
+# ==================================================
 
 apres_ski = pd.read_excel(DATA_DIR / "apres_ski.xlsx")
 skating = pd.read_excel(DATA_DIR / "skating_rinks_with_travel.xlsx")
@@ -242,6 +255,7 @@ ski = pd.read_excel(DATA_DIR / "ski_resorts_with_travel.xlsx")
 snowshoe = pd.read_excel(DATA_DIR / "snowshoe_trails_with_travel.xlsx")
 winter_hiking = pd.read_excel(DATA_DIR / "winter_hiking_with_travel.xlsx")
 
+# Translate German difficulty labels from the original datasets
 difficulty_translation = {
     "leicht": "Easy",
     "mittel": "Moderate",
@@ -253,11 +267,13 @@ difficulty_translation = {
 snowshoe["difficulty"] = snowshoe["difficulty"].replace(difficulty_translation)
 winter_hiking["difficulty"] = winter_hiking["difficulty"].replace(difficulty_translation)
 
+# Add activity labels so we can combine the datasets
 skating["activity_type"] = "Ice skating"
 ski["activity_type"] = "Skiing"
 snowshoe["activity_type"] = "Snowshoeing"
 winter_hiking["activity_type"] = "Winter hiking"
 
+# These are the columns we want from each file
 standard_columns = [
     "name",
     "activity_type",
@@ -281,51 +297,45 @@ all_activities = pd.concat(
     ignore_index=True
 )
 
-# --------------------------------------------------
-# LOAD WEATHER STATION MATCHES
-# --------------------------------------------------
-weather_matches = pd.read_excel(
-    DATA_DIR / "activity_locations_with_weather_stations.xlsx"
-)
 
-# Clean column names
+# ==================================================
+# MATCH ACTIVITIES TO WEATHER STATIONS
+# ==================================================
+
+# This file was made during preprocessing. It connects activity coordinates
+# to the nearest MeteoSwiss station.
+weather_matches = pd.read_excel(DATA_DIR / "activity_locations_with_weather_stations.xlsx")
 weather_matches.columns = weather_matches.columns.str.strip()
 
-# Create helper rounded coordinate columns
+# Coordinates are not always exactly identical, so we round them before matching.
 all_activities["lat_round"] = all_activities["latitude"].round(4)
 all_activities["lon_round"] = all_activities["longitude"].round(4)
 
 weather_matches["lat_round"] = weather_matches["lat_left"].round(4)
 weather_matches["lon_round"] = weather_matches["lon_left"].round(4)
 
-# Build lookup table: activity coordinates -> MeteoSwiss station abbreviation
 weather_lookup = weather_matches[
     ["lat_round", "lon_round", "station_abbr"]
 ].drop_duplicates()
 
-# Rename station_abbr to station_id for the website logic
-weather_lookup = weather_lookup.rename(
-    columns={"station_abbr": "station_id"}
-)
+weather_lookup = weather_lookup.rename(columns={"station_abbr": "station_id"})
 
-# IMPORTANT: remove old empty station_id if it exists
+# We already had an empty station_id column in some files, so drop it first.
 if "station_id" in all_activities.columns:
     all_activities = all_activities.drop(columns=["station_id"])
 
-# Merge station_id into activity table
 all_activities = all_activities.merge(
     weather_lookup,
     on=["lat_round", "lon_round"],
     how="left"
 )
 
-# Remove helper columns
-all_activities = all_activities.drop(
-    columns=["lat_round", "lon_round"]
-)
+all_activities = all_activities.drop(columns=["lat_round", "lon_round"])
 
+
+# Add estimated distance and travel time from Zurich
 all_activities["distance_from_zurich_km"] = all_activities.apply(
-    lambda row: calculate_distance_from_zurich(row["latitude"], row["longitude"]),
+    lambda row: get_distance_from_zurich(row["latitude"], row["longitude"]),
     axis=1
 )
 
@@ -333,70 +343,36 @@ all_activities["travel_time_min"] = all_activities["distance_from_zurich_km"].ap
     estimate_travel_time
 )
 
-# Header
+
+# ==================================================
+# WEBSITE HEADER
+# ==================================================
+
 st.title("❄️ Swiss Winter Activity Finder")
 st.write("This app suggests winter activities based on difficulty, weather, price, and estimated travel time.")
 st.caption("Travel time is estimated from Zürich HB using coordinates, so it is approximate.")
 
-# Sidebar
-st.sidebar.header("Choose your preferences")
+
+# ==================================================
+# SIDEBAR INPUTS
+# ==================================================
+
+st.sidebar.header("Choose your preferences:")
 
 activity_choice = st.sidebar.radio(
-    "Choose one activity",
+    "What activity do you want to do?",
     options=sorted(all_activities["activity_type"].dropna().unique())
 )
 
-max_price = st.sidebar.slider(
-    "Maximum price (CHF)",
-    min_value=0,
-    max_value=150,
-    value=50
-)
-
-max_travel_time = st.sidebar.slider(
-    "Maximum estimated travel time from Zürich HB (minutes)",
-    min_value=0,
-    max_value=300,
-    value=180
-)
-
-use_weather = st.sidebar.checkbox("Use weather-based recommendations ☀️❄️", value=True)
-selected_month = st.sidebar.selectbox(
-    "Choose travel month",
-    options=[
-        "October",
-        "November",
-        "December",
-        "January",
-        "February",
-        "March",
-        "April"
-    ],
-    index=3  # January default
-)
-
-month_mapping = {
-    "October": 10,
-    "November": 11,
-    "December": 12,
-    "January": 1,
-    "February": 2,
-    "March": 3,
-    "April": 4
-}
-
-selected_month_number = month_mapping[selected_month]
-add_apres = st.sidebar.checkbox("Add nearby après-ski suggestions 🍻")
-
-# Start filtering
+# Filter by activity first so the rest of the questions can adapt
 filtered = all_activities[
     all_activities["activity_type"] == activity_choice
 ].copy()
 
-# Difficulty filter only for snowshoeing and winter hiking
+# Difficulty only applies to snowshoeing and winter hiking in our datasets
 if activity_choice in ["Snowshoeing", "Winter hiking"]:
 
-    st.sidebar.markdown("### Select difficulty levels")
+    st.sidebar.markdown("### How difficult do you want it to be?")
 
     easy_checked = st.sidebar.checkbox("Easy", value=True)
     moderate_checked = st.sidebar.checkbox("Moderate", value=True)
@@ -417,20 +393,88 @@ if activity_choice in ["Snowshoeing", "Winter hiking"]:
         filtered["difficulty"].isin(selected_difficulties)
     ].copy()
 
-filtered = filtered[
-    (filtered["price"].isna()) | (filtered["price"] <= max_price)
-].copy()
+# Price only matters for paid activities
+if activity_choice == "Ice skating":
+    max_price = st.sidebar.slider(
+        "How much are you willing to spend (CHF)?",
+        min_value=0,
+        max_value=10,
+        value=10
+    )
+
+    filtered = filtered[
+        (filtered["price"].isna()) | (filtered["price"] <= max_price)
+    ].copy()
+
+elif activity_choice == "Skiing":
+    max_price = st.sidebar.slider(
+        "How much are you willing to spend (CHF)?",
+        min_value=0,
+        max_value=150,
+        value=50
+    )
+
+    filtered = filtered[
+        (filtered["price"].isna()) | (filtered["price"] <= max_price)
+    ].copy()
+
+else:
+    max_price = None
+
+max_travel_time = st.sidebar.slider(
+    "How much time are you willing to spend travelling from Zürich HB (mins)?",
+    min_value=0,
+    max_value=300,
+    value=180
+)
+
+use_weather = st.sidebar.checkbox("Use weather-based recommendations ☀️❄️", value=True)
+
+if use_weather:
+    selected_month = st.sidebar.selectbox(
+        "When are you going?",
+        options=[
+            "October",
+            "November",
+            "December",
+            "January",
+            "February",
+            "March",
+            "April"
+        ],
+        index=3
+    )
+
+    month_mapping = {
+        "October": 10,
+        "November": 11,
+        "December": 12,
+        "January": 1,
+        "February": 2,
+        "March": 3,
+        "April": 4
+    }
+
+    selected_month_number = month_mapping[selected_month]
+else:
+    selected_month_number = None
+
+add_apres = st.sidebar.checkbox("Add nearby après-ski suggestions 🍻")
+
+
+# ==================================================
+# FILTER AND SCORE ACTIVITIES
+# ==================================================
 
 filtered = filtered[
     (filtered["travel_time_min"].isna()) |
     (filtered["travel_time_min"] <= max_travel_time)
 ].copy()
 
-# Weather scoring
 if use_weather and not filtered.empty:
     with st.spinner("Checking weather conditions..."):
         weather_summaries = filtered.apply(
-            lambda row: calculate_weather_summary(
+            lambda row: get_weather_score(
                 row["station_id"],
                 row["activity_type"],
                 selected_month_number
@@ -442,25 +486,25 @@ if use_weather and not filtered.empty:
         filtered["sun_checks"] = weather_summaries.apply(lambda x: x["sun_checks"])
         filtered["snow_checks"] = weather_summaries.apply(lambda x: x["snow_checks"])
         filtered["avg_temp"] = weather_summaries.apply(lambda x: x["avg_temp"])
-        filtered["weather_reason"] = weather_summaries.apply(lambda x: x["weather_reason"])
+
 else:
     filtered["weather_score"] = 50
     filtered["sun_checks"] = "☀️ —"
     filtered["snow_checks"] = "❄️ —"
     filtered["avg_temp"] = None
-    filtered["weather_reason"] = "Weather scoring not used"
 
-# Final score
+# Price score: lower price is better
 price_score = 100 - filtered["price"].fillna(0)
 
+# Travel score: we favour options close to the user's max travel time but still under it
 filtered["travel_score"] = 100 - abs(
     filtered["travel_time_min"].fillna(max_travel_time) - max_travel_time
 )
 
 filtered["travel_score"] = filtered["travel_score"].clip(lower=0, upper=100)
 
-# Difficulty is already required by filtering.
-# Weather is most important, price is second, distance/travel time is least important.
+# Difficulty is already a hard filter.
+# Then we rank mostly by weather, then price, then travel convenience.
 filtered["score"] = (
     0.6 * filtered["weather_score"].fillna(50) +
     0.3 * price_score +
@@ -469,7 +513,11 @@ filtered["score"] = (
 
 top_3 = filtered.sort_values("score", ascending=False).head(3)
 
-# Page layout
+
+# ==================================================
+# MAIN PAGE OUTPUT
+# ==================================================
+
 col1, col2 = st.columns([2, 1])
 
 with col1:
@@ -508,31 +556,60 @@ with col1:
                 if pd.notna(row["avg_temp"]):
                     st.write(f"**Average temperature:** {row['avg_temp']} °C")
 
-                st.write(f"**Why:** {row['weather_reason']}")
                 st.write(f"**Final score:** {round(row['score'], 1)} / 100")
 
-                # Google search link
-                google_search_url = (
-                    "https://www.google.com/search?q="
-                    + row["name"].replace(" ", "+")
-                )
-
-                st.markdown(
-                    f'[🔎 Find the Activity on Google]({google_search_url})'
-                )
+                google_search_url = "https://www.google.com/search?q=" + row["name"].replace(" ", "+")
+                st.markdown(f"[🔎 Find the activity on Google]({google_search_url})")
 
                 st.divider()
 
+
+# ==================================================
+# MAP
+# ==================================================
+
+m = folium.Map(location=[47.3769, 8.5417], zoom_start=8)
+
+folium.Marker(
+    [47.3782, 8.5402],
+    popup="Zürich HB",
+    tooltip="Start: Zürich HB",
+    icon=folium.Icon(color="blue", icon="home")
+).add_to(m)
+
+for _, row in top_3.iterrows():
+    if pd.notna(row["latitude"]) and pd.notna(row["longitude"]):
+        folium.Marker(
+            [row["latitude"], row["longitude"]],
+            popup=row["name"],
+            tooltip=row["name"],
+            icon=folium.Icon(color="purple", icon="info-sign")
+        ).add_to(m)
+
+st_folium(m, width=1100, height=500, returned_objects=[])
+
+
+# ==================================================
+# QUICK STATS
+# ==================================================
+
 with col2:
-    st.subheader("📊 Quick Stats")
-    st.metric("Matching Activities", len(filtered))
-    st.metric("Top Recommendations", len(top_3))
+    if use_weather and not filtered.empty:
+        average_weather = round(filtered["weather_score"].mean(), 1)
+    else:
+        average_weather = "-"
 
-    if use_weather:
-        average_weather = round(filtered["weather_score"].mean(), 1) if not filtered.empty else 0
-        st.metric("Average Weather Score", average_weather)
+    with st.container(border=True):
+        st.markdown("## 📊 Quick Stats")
 
-# Après-ski add-on
+        st.write(f"**Matching Activities:** {len(filtered)}")
+        st.write(f"**Top Recommendations:** {len(top_3)}")
+        st.write(f"**Average Weather Score:** {average_weather}")
+
+# ==================================================
+# APRÈS-SKI ADD-ON
+# ==================================================
+
 if add_apres and not top_3.empty:
     st.subheader("🍻 Nearby Après-Ski Suggestions")
 
@@ -550,15 +627,13 @@ if add_apres and not top_3.empty:
             st.write(f"**Après-ski option:** {closest_apres['name']}")
 
             if pd.notna(closest_apres["address"]):
-
                 google_maps_url = (
                     "https://www.google.com/maps/search/?api=1&query="
                     + closest_apres["address"].replace(" ", "+")
                 )
 
                 st.markdown(
-                    f'**Location:** '
-                    f'<a href="{google_maps_url}" target="_blank">'
+                    f'**Location:** <a href="{google_maps_url}" target="_blank">'
                     f'{closest_apres["address"]}</a>',
                     unsafe_allow_html=True
                 )
