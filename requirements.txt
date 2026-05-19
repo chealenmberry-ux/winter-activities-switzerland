@@ -3,3 +3,5 @@ numpy
 geopy
 openpyxl
 streamlit
+folium
+streamlit-folium
