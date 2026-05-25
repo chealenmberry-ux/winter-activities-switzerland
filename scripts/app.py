@@ -1,3 +1,6 @@
+# Import the main libraries used by the app:
+# pandas handles table/data processing, Streamlit builds the web interface,
+# requests downloads weather data, and folium creates the interactive map.
 import pandas as pd
 import streamlit as st
 import requests
@@ -9,6 +12,7 @@ from streamlit_folium import st_folium
 
 
 # Page setup
+# Configure the Streamlit page title, icon, and layout before anything is displayed.
 st.set_page_config(
     page_title="Swiss Winter Activity Finder",
     page_icon="❄️",
@@ -17,6 +21,7 @@ st.set_page_config(
 
 
 # Custom CSS because the default Streamlit theme was too bright for a winter app
+# The CSS affects Streamlit-generated HTML elements.
 st.markdown("""
 <style>
     <style>
@@ -61,9 +66,12 @@ st.markdown("""
 # ==================================================
 
 # Zurich HB coordinates
+# These are used as the starting point for distance and travel-time estimates.
 ZURICH_LAT = 47.3782
 ZURICH_LON = 8.5402
 
+# Define paths to the project folder and data folder.
+# This makes the app work even if it is run from a different directory.
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 
@@ -72,6 +80,9 @@ DATA_DIR = BASE_DIR / "data"
 # TRAVEL TIME FUNCTIONS
 # ==================================================
 
+# Calculate the straight-line distance between Zürich HB and an activity location.
+# This uses the Haversine formula, which estimates distance between two latitude/longitude points.
+# The result is returned in kilometers.
 def get_distance_from_zurich(lat, lon):
     # Haversine formula, adapted from examples online
     if pd.isna(lat) or pd.isna(lon):
@@ -92,7 +103,9 @@ def get_distance_from_zurich(lat, lon):
 
     return earth_radius * c
 
-
+# Convert distance into an estimated travel time.
+# This is a rough approximation, not a real train/car route calculation.
+# We assume an average travel speed of 45 km/h and convert the result to minutes.
 def estimate_travel_time(distance_km):
     # We estimate travel time from distance. This is not exact public transit time.
     if pd.isna(distance_km):
@@ -106,6 +119,9 @@ def estimate_travel_time(distance_km):
 # WEATHER FUNCTIONS
 # ==================================================
 
+# Download recent weather data from MeteoSwiss for a given weather station.
+# The app combines snow/precipitation data and sunshine/temperature data into one table.
+# The function is designed so Streamlit does not re-download the same station data repeatedly.
 @st.cache_data(show_spinner=False)
 def download_weather_data(station_id):
     # Downloads recent MeteoSwiss data for a station
@@ -146,7 +162,8 @@ def download_weather_data(station_id):
     except Exception:
         return None
 
-
+# Calculate a weather suitability score for each activity.
+# The score starts at 50 and then increases or decreases based on the activity type.
 def get_weather_score(station_id, activity_type, selected_month):
     # Default score if we do not have weather data
     default_weather = {
@@ -172,6 +189,7 @@ def get_weather_score(station_id, activity_type, selected_month):
     weather = weather.dropna(subset=["reference_timestamp"])
 
     # Keep only the selected month
+    # This lets recommendations reflect typical conditions for the user's travel month.
     weather = weather[
         weather["reference_timestamp"].dt.month == selected_month
     ]
@@ -179,6 +197,8 @@ def get_weather_score(station_id, activity_type, selected_month):
     if weather.empty:
         return default_weather
 
+    # Calculate average weather values for this station and selected month.
+    # These averages are used to create the weather score and icon summaries.
     avg_sunshine = weather["sre000d0"].mean() if "sre000d0" in weather else 0
     avg_snow_height = weather["hto000d0"].mean() if "hto000d0" in weather else 0
     avg_new_snow = weather["hns000d0"].mean() if "hns000d0" in weather else 0
@@ -213,6 +233,9 @@ def get_weather_score(station_id, activity_type, selected_month):
     score = 50
 
     # These scores are our simple ranking assumptions
+    # Apply different scoring rules depending on the activity.
+    # Each activity type has different ideal weather conditions.
+    # Add the positive weather condition scores, subtract the negative ones.
     if activity_type == "Skiing":
         score += min(avg_snow_height / 2, 30)
         score += min(avg_new_snow * 2, 15)
@@ -249,6 +272,8 @@ def get_weather_score(station_id, activity_type, selected_month):
 # LOAD AND PREPARE DATA
 # ==================================================
 
+# Load the Excel datasets that contain the activities and après-ski locations.
+# Each activity type is stored in a separate spreadsheet.
 apres_ski = pd.read_excel(DATA_DIR / "apres_ski.xlsx")
 skating = pd.read_excel(DATA_DIR / "skating_rinks_with_travel.xlsx")
 ski = pd.read_excel(DATA_DIR / "ski_resorts_with_travel.xlsx")
@@ -264,6 +289,7 @@ difficulty_translation = {
     "anspruchsvoll": "Hard"
 }
 
+# Add difficulty labels for snowshoeing and winter hiking
 snowshoe["difficulty"] = snowshoe["difficulty"].replace(difficulty_translation)
 winter_hiking["difficulty"] = winter_hiking["difficulty"].replace(difficulty_translation)
 
@@ -274,6 +300,7 @@ snowshoe["activity_type"] = "Snowshoeing"
 winter_hiking["activity_type"] = "Winter hiking"
 
 # These are the columns we want from each file
+# Missing columns are filled with blank values when the tables are combined.
 standard_columns = [
     "name",
     "activity_type",
@@ -287,6 +314,7 @@ standard_columns = [
     "station_id"
 ]
 
+# Combine all activity datasets into one dataframe so they can be filtered and ranked together.
 all_activities = pd.concat(
     [
         skating.reindex(columns=standard_columns),
@@ -324,6 +352,8 @@ weather_lookup = weather_lookup.rename(columns={"station_abbr": "station_id"})
 if "station_id" in all_activities.columns:
     all_activities = all_activities.drop(columns=["station_id"])
 
+# Add the matched weather station ID to each activity.
+# This station ID is later used to download weather data.
 all_activities = all_activities.merge(
     weather_lookup,
     on=["lat_round", "lon_round"],
@@ -348,6 +378,7 @@ all_activities["travel_time_min"] = all_activities["distance_from_zurich_km"].ap
 # WEBSITE HEADER
 # ==================================================
 
+# Display the main title and short explanation shown at the top of the website.
 st.title("❄️ Swiss Winter Activity Finder")
 st.write("This app suggests winter activities based on difficulty, weather, price, and estimated travel time.")
 st.caption("Travel time is estimated from Zürich HB using coordinates, so it is approximate.")
@@ -357,8 +388,11 @@ st.caption("Travel time is estimated from Zürich HB using coordinates, so it is
 # SIDEBAR INPUTS
 # ==================================================
 
+# Create sidebar inputs where users choose their activity preferences.
+# These inputs control how the activity list is filtered and ranked.
 st.sidebar.header("Choose your preferences:")
 
+# Let the user choose one activity type.
 activity_choice = st.sidebar.radio(
     "What activity do you want to do?",
     options=sorted(all_activities["activity_type"].dropna().unique())
@@ -370,6 +404,7 @@ filtered = all_activities[
 ].copy()
 
 # Difficulty only applies to snowshoeing and winter hiking in our datasets
+# Difficulty is used as a hard filter, not as part of the score.
 if activity_choice in ["Snowshoeing", "Winter hiking"]:
 
     st.sidebar.markdown("### How difficult do you want it to be?")
@@ -394,6 +429,7 @@ if activity_choice in ["Snowshoeing", "Winter hiking"]:
     ].copy()
 
 # Price only matters for paid activities
+# Ice skating and skiing have different price ranges.
 if activity_choice == "Ice skating":
     max_price = st.sidebar.slider(
         "How much are you willing to spend (CHF)?",
@@ -421,6 +457,9 @@ elif activity_choice == "Skiing":
 else:
     max_price = None
 
+# Let the user set the maximum travel time they are willing to accept.
+# This program treats this travel time as a reference point for the suggested activities.
+# It tries to find activities that are within the user's preferred travel time, while favoring activites close to the indicated time.
 max_travel_time = st.sidebar.slider(
     "How much time are you willing to spend travelling from Zürich HB (mins)?",
     min_value=0,
@@ -428,8 +467,10 @@ max_travel_time = st.sidebar.slider(
     value=180
 )
 
+# Let the user decide whether weather should influence recommendations.
 use_weather = st.sidebar.checkbox("Use weather-based recommendations ☀️❄️", value=True)
 
+# If weather is enabled, the user also chooses the travel month.
 if use_weather:
     selected_month = st.sidebar.selectbox(
         "When are you going?",
@@ -459,6 +500,7 @@ if use_weather:
 else:
     selected_month_number = None
 
+# Optional add-on: if selected, the app suggests nearby après-ski locations for the top activities.
 add_apres = st.sidebar.checkbox("Add nearby après-ski suggestions 🍻")
 
 
@@ -466,11 +508,14 @@ add_apres = st.sidebar.checkbox("Add nearby après-ski suggestions 🍻")
 # FILTER AND SCORE ACTIVITIES
 # ==================================================
 
+# Remove activities that exceed the user's maximum travel time.
 filtered = filtered[
     (filtered["travel_time_min"].isna()) |
     (filtered["travel_time_min"] <= max_travel_time)
 ].copy()
 
+# If weather scoring is enabled, calculate a weather score for every remaining activity.
+# If not, assign all activities a neutral weather score of 50.
 if use_weather and not filtered.empty:
     with st.spinner("Checking weather conditions..."):
         weather_summaries = filtered.apply(
@@ -494,9 +539,10 @@ else:
     filtered["avg_temp"] = None
 
 # Price score: lower price is better
+# Missing prices are treated as 0 CHF.
 price_score = 100 - filtered["price"].fillna(0)
 
-# Travel score: we favour options close to the user's max travel time but still under it
+# Travel score: we favor options close to the user's max travel time but still under it
 filtered["travel_score"] = 100 - abs(
     filtered["travel_time_min"].fillna(max_travel_time) - max_travel_time
 )
@@ -511,6 +557,7 @@ filtered["score"] = (
     0.1 * filtered["travel_score"]
 )
 
+# Sort activities by final score and keep the top three recommendations.
 top_3 = filtered.sort_values("score", ascending=False).head(3)
 
 
@@ -518,8 +565,12 @@ top_3 = filtered.sort_values("score", ascending=False).head(3)
 # MAIN PAGE OUTPUT
 # ==================================================
 
+# Split the page into two columns:
+# the left side shows recommendations and the map,
+# while the right side shows quick summary statistics.
 col1, col2 = st.columns([2, 1])
 
+# Display each top recommendation with its key details, weather information, and final score.
 with col1:
     st.subheader("🏔️ Top Recommendations")
 
@@ -558,6 +609,7 @@ with col1:
 
                 st.write(f"**Final score:** {round(row['score'], 1)} / 100")
 
+                # Add a Google search link so users can quickly look up more information about the activity.
                 google_search_url = "https://www.google.com/search?q=" + row["name"].replace(" ", "+")
                 st.markdown(f"[🔎 Find the activity on Google]({google_search_url})")
 
@@ -568,8 +620,10 @@ with col1:
 # MAP
 # ==================================================
 
+# Create an interactive map centered around Switzerland.
 m = folium.Map(location=[47.3769, 8.5417], zoom_start=8)
 
+# Add Zürich HB as the starting reference point on the map.
 folium.Marker(
     [47.3782, 8.5402],
     popup="Zürich HB",
@@ -577,6 +631,7 @@ folium.Marker(
     icon=folium.Icon(color="blue", icon="home")
 ).add_to(m)
 
+# Add a map marker for each recommended activity.
 for _, row in top_3.iterrows():
     if pd.notna(row["latitude"]) and pd.notna(row["longitude"]):
         folium.Marker(
@@ -586,6 +641,7 @@ for _, row in top_3.iterrows():
             icon=folium.Icon(color="purple", icon="info-sign")
         ).add_to(m)
 
+# Display the Folium map inside the Streamlit app.
 st_folium(m, width=1100, height=500, returned_objects=[])
 
 
@@ -593,6 +649,7 @@ st_folium(m, width=1100, height=500, returned_objects=[])
 # QUICK STATS
 # ==================================================
 
+# Show summary statistics for the current filtered results.
 with col2:
     if use_weather and not filtered.empty:
         average_weather = round(filtered["weather_score"].mean(), 1)
@@ -610,12 +667,16 @@ with col2:
 # APRÈS-SKI ADD-ON
 # ==================================================
 
+# If the user selects the après-ski option, find the closest après-ski venue
+# to each top recommended activity using latitude/longitude distance.
 if add_apres and not top_3.empty:
     st.subheader("🍻 Nearby Après-Ski Suggestions")
 
     for _, activity in top_3.iterrows():
         if pd.notna(activity["latitude"]) and pd.notna(activity["longitude"]):
 
+            # Calculate a simple coordinate-based distance score between the activity and each après-ski venue.
+            # The lowest score is treated as the closest venue.
             apres_ski["distance_score"] = (
                 (apres_ski["latitude"] - activity["latitude"]) ** 2
                 + (apres_ski["longitude"] - activity["longitude"]) ** 2
@@ -626,6 +687,7 @@ if add_apres and not top_3.empty:
             st.markdown(f"### Near {activity['name']}")
             st.write(f"**Après-ski option:** {closest_apres['name']}")
 
+            # Display the après-ski address as a clickable Google Maps link.
             if pd.notna(closest_apres["address"]):
                 google_maps_url = (
                     "https://www.google.com/maps/search/?api=1&query="
